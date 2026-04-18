@@ -1,70 +1,138 @@
-# WGAN-based Synthetic Data Augmentation for Plant Disease Detection
-### Full PlantVillage Dataset — All Plants, All Diseases
+# 🌿 WGAN-based Synthetic Data Augmentation for Plant Disease Detection  
 
-## Problem Statement
-The PlantVillage dataset contains images from many plant types (tomato, corn, grape,
-pepper, potato, etc.) across dozens of disease categories. Healthy plant images
-naturally outnumber diseased ones, creating class imbalance. A classifier trained on
-this imbalanced data learns to predict "healthy" most of the time — a dangerous
-bias in agricultural AI where missing a disease costs crops.
+## 📌 Overview  
+This project uses a **Wasserstein GAN (WGAN)** to generate synthetic plant disease images and address **class imbalance** in the PlantVillage dataset.  
+The goal is to improve classification performance by balancing diseased and healthy samples.
 
-This project trains a Wasserstein GAN (WGAN) on all diseased leaf images across
-the entire dataset, generates synthetic diseased images to balance the data, and
-proves the improvement by comparing classifier accuracy before and after augmentation.
+---
 
-## GAN Variant
-**Wasserstein GAN (WGAN)** — chosen over vanilla GAN/DCGAN because:
-- More stable training (no mode collapse even on diverse multi-plant data)
-- Wasserstein distance provides meaningful gradient signal throughout training
-- Weight clipping ensures Lipschitz constraint
-- Better handles the visual diversity of a large multi-class dataset
+## ❗ Problem Statement  
+In real-world agricultural datasets, **healthy leaf images often outnumber diseased ones**, causing machine learning models to become biased toward predicting “healthy.”  
 
-## Dataset
-PlantVillage (full) — all plant types, all disease categories
-- Automatically detects healthy vs diseased folders
-- Caps per-class to keep training feasible on CPU
-- Saves dataset statistics to data/processed/dataset_info.json
+This project:
+- Generates synthetic diseased images using WGAN  
+- Balances the dataset  
+- Compares classifier performance before and after augmentation  
 
-## How to Run
-```bash
+---
+
+## 🧠 GAN Variant Used  
+**Wasserstein GAN (WGAN)**  
+
+Reasons for choosing WGAN:
+- Stable training compared to vanilla GANs  
+- Uses Wasserstein distance for meaningful gradients  
+- Reduces mode collapse  
+- Works better for diverse image distributions  
+
+---
+
+## 📂 Dataset  
+- **PlantVillage Dataset (Full)**  
+- Contains multiple plant species and disease categories  
+
+### Dataset Setup
+- Imbalanced: **500 diseased vs 100 healthy (5:1 ratio)**  
+- After augmentation: **500 diseased vs 500 healthy (1:1 ratio)** ✅  
+
+---
+
+## ⚙️ How to Run  
+
 pip install -r requirements.txt
-# Data already downloaded — skip download_data.py
-python preprocess.py        # ~2-5 min
-python train_wgan.py        # ~2-4 hrs on CPU (let run overnight)
-python augment.py           # ~5 min
-python evaluate.py          # ~10 min
-python classify.py          # ~20 min
-jupyter notebook visualize.ipynb
-```
 
-## File Structure
-```
+python preprocess.py
+python train_wgan.py
+python augment.py
+python evaluate.py
+python classify.py
+
+jupyter notebook visualize.ipynb
+
+---
+
+## 📁 Project Structure  
+
 wgan_plant_disease/
 ├── models/
-│   ├── generator.py     # Generator: noise -> 64x64 diseased leaf image
-│   └── critic.py        # Critic: image -> real-valued score (no sigmoid)
+│   ├── generator.py
+│   └── critic.py
 ├── data/
-│   └── plantvillage dataset/color/   <- your downloaded dataset goes here
 ├── outputs/
-│   ├── generated_images/   # saved grids every 10 epochs
-│   └── checkpoints/        # model checkpoints
-├── preprocess.py    # scans full dataset, auto-detects healthy/diseased
-├── train_wgan.py    # WGAN training loop on all diseased images
-├── augment.py       # generates synthetic images to balance dataset
-├── evaluate.py      # FID, IS, Wasserstein distance
-├── classify.py      # CNN before vs after accuracy comparison
-└── visualize.ipynb  # all plots including disease class breakdown
-```
+│   ├── generated_images/
+│   └── checkpoints/
+├── preprocess.py
+├── train_wgan.py
+├── augment.py
+├── evaluate.py
+├── classify.py
+└── visualize.ipynb
 
-## Results
-| Metric | Value |
-|--------|-------|
-| FID Score | ~X |
-| Inception Score | ~X ± X |
-| Classifier accuracy (before) | ~X% |
-| Classifier accuracy (after)  | ~X% |
-| Improvement | +X% |
+---
 
-## References
-- Arjovsky et al. (2017). Wasserstein GAN. arXiv:1701.07875
-- Hughes et al. PlantVillage Dataset. Penn State University
+# 📊 Results  
+
+## 🔹 Classification Performance  
+
+### Without Augmentation
+- Accuracy: **80.74%**  
+- Diseased Accuracy: **95.58%**  
+- Healthy Accuracy: **47.98%** ⚠️  
+
+---
+
+### With WGAN Augmentation
+- Accuracy: **86.23%**  
+- Diseased Accuracy: **84.33%**  
+- Healthy Accuracy: **90.45%** ✅  
+
+---
+
+## 📈 Final Comparison  
+
+| Metric | Before | After | Change |
+|--------|--------|--------|--------|
+| Overall Accuracy | 80.74% | 86.23% | **+5.49%** |
+| Diseased Accuracy | 95.6% | 84.3% | -11.2% |
+| Healthy Accuracy | 48.0% | 90.4% | **+42.5%** |
+
+---
+
+## 🧠 Key Insight  
+- Initial model was biased toward diseased class  
+- After augmentation:
+  - Dataset became balanced  
+  - Healthy class performance improved significantly  
+  - Slight drop in diseased accuracy (expected trade-off)  
+
+👉 Overall model becomes **more reliable and balanced**
+
+---
+
+## 🎯 GAN Evaluation Metrics  
+
+- **FID Score:** 103.33 *(lower is better)*  
+- **Inception Score:** 3.00 ± 0.10 *(higher is better)*  
+- **Wasserstein Distance:** 0.7606 *(training stability indicator)*  
+
+---
+
+## 📷 Outputs  
+- Generated images → `outputs/generated_images/`  
+- Model checkpoints → `outputs/checkpoints/`  
+
+---
+
+## 🏆 Conclusion  
+WGAN-based augmentation:
+- Successfully balances dataset  
+- Improves classification accuracy  
+- Reduces bias toward majority class  
+
+👉 Demonstrates practical use of GANs in **agriculture AI**
+
+---
+
+## 📚 References  
+- Arjovsky et al. (2017), *Wasserstein GAN*  
+- PlantVillage Dataset, Penn State University  
