@@ -1,0 +1,347 @@
+# Cell 1 — Imports
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from PIL import Image
+import os, json, random
+
+plt.rcParams['figure.facecolor'] = 'white'
+plt.rcParams['axes.facecolor']   = '#f9f9f9'
+print('Imports done')
+
+# Cell 2 — Dataset overview: how many classes, how many images
+with open('data/processed/dataset_info.json') as f:
+    info = json.load(f)
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+fig.suptitle('PlantVillage Dataset Overview — All Plants, All Diseases', fontsize=13, fontweight='bold')
+
+# Bar chart: number of images per split
+splits  = ['Train Healthy', 'Train Diseased', 'Test Healthy', 'Test Diseased']
+counts  = [info['train_healthy'], info['train_diseased'],
+            info['test_healthy'],  info['test_diseased']]
+colors  = ['#1D9E75', '#D85A30', '#5DCAA5', '#F0997B']
+bars    = axes[0].bar(splits, counts, color=colors, edgecolor='white')
+for bar, count in zip(bars, counts):
+    axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5,
+                 str(count), ha='center', fontsize=10, fontweight='bold')
+axes[0].set_title('Image counts per split', fontsize=11)
+axes[0].set_ylabel('Number of images')
+axes[0].tick_params(axis='x', rotation=15)
+axes[0].grid(axis='y', alpha=0.3)
+
+# Pie: healthy vs diseased overall
+total_h = info['train_healthy'] + info['test_healthy']
+total_d = info['train_diseased'] + info['test_diseased']
+axes[1].pie([total_h, total_d],
+             labels=[f'Healthy\n({total_h})', f'Diseased\n({total_d})'],
+             colors=['#1D9E75', '#D85A30'], autopct='%1.1f%%',
+             wedgeprops={'edgecolor': 'white', 'linewidth': 2})
+axes[1].set_title(f'Class distribution\n({len(info["diseased_classes"])} disease types, {len(info["healthy_classes"])} healthy types)', fontsize=11)
+
+plt.tight_layout()
+plt.savefig('outputs/dataset_overview.png', dpi=150, bbox_inches='tight')
+plt.show()
+print(f"Diseased classes ({len(info['diseased_classes'])}):", ', '.join(info['diseased_classes'][:5]), '...')
+print(f"Healthy classes  ({len(info['healthy_classes'])}):")
+
+# Cell 3 — Sample real images: one from each plant type (healthy AND diseased)
+# Shows the variety of plants our WGAN learned from
+
+def get_sample_images(folder, n=8):
+    files = [f for f in os.listdir(folder) if not f.startswith('.')]
+    # Try to get one from each plant family by sampling with prefix diversity
+    prefixes = list({f.split('__')[0] for f in files})
+    sampled = []
+    for prefix in prefixes[:n]:
+        candidates = [f for f in files if f.startswith(prefix)]
+        if candidates:
+            sampled.append(random.choice(candidates))
+    # Pad with random if needed
+    while len(sampled) < n and files:
+        f = random.choice(files)
+        if f not in sampled:
+            sampled.append(f)
+    return sampled[:n]
+
+healthy_dir  = 'data/processed/train/healthy'
+diseased_dir = 'data/processed/train/diseased'
+gen_dir      = 'data/processed/generated_diseased'
+
+n_cols = 8
+rows   = []
+rows.append(('Real Healthy (various plants)',  healthy_dir,  get_sample_images(healthy_dir,  n_cols), '#1D9E75'))
+rows.append(('Real Diseased (various plants)', diseased_dir, get_sample_images(diseased_dir, n_cols), '#D85A30'))
+if os.path.exists(gen_dir):
+    gen_files = sorted(os.listdir(gen_dir))[:n_cols]
+    rows.append(('WGAN Generated Diseased',       gen_dir,      gen_files,                            '#7F77DD'))
+
+fig, axes = plt.subplots(len(rows), n_cols, figsize=(16, 2.5*len(rows)))
+fig.suptitle('PlantVillage — Real vs WGAN Generated Images', fontsize=13, fontweight='bold')
+
+for row_idx, (title, d, files, color) in enumerate(rows):
+    for col_idx in range(n_cols):
+        ax = axes[row_idx, col_idx] if len(rows) > 1 else axes[col_idx]
+        if col_idx < len(files):
+            img = Image.open(os.path.join(d, files[col_idx])).resize((64, 64))
+            ax.imshow(img)
+            # Show plant name from filename prefix
+            plant = files[col_idx].split('__')[0].replace('_', ' ')[:15]
+            ax.set_xlabel(plant, fontsize=6, color='gray')
+        ax.axis('off') if col_idx > 0 else None
+        ax.set_xticks([]); ax.set_yticks([])
+        if col_idx == 0:
+            ax.set_ylabel(title, color=color, fontweight='bold', fontsize=9)
+
+plt.tight_layout()
+plt.savefig('outputs/real_vs_generated.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Cell 4 — WGAN training progression (epoch 10 -> 50 -> 100)
+epoch_snapshots = [10, 50, 100]
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+fig.suptitle('WGAN Training Progression — Generated Disease Patterns Improve Over Time', fontsize=12, fontweight='bold')
+
+for ax, epoch in zip(axes, epoch_snapshots):
+    path = f'outputs/generated_images/epoch_{epoch:03d}.png'
+    if os.path.exists(path):
+        ax.imshow(Image.open(path))
+        ax.set_title(f'Epoch {epoch}', fontsize=11)
+    else:
+        ax.text(0.5, 0.5, f'Run training\nto epoch {epoch}',
+                ha='center', va='center', transform=ax.transAxes, color='gray')
+    ax.axis('off')
+
+plt.tight_layout()
+plt.savefig('outputs/training_progression.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Cell 5 — Loss curves + Wasserstein distance
+g_losses    = np.load('outputs/g_losses.npy')
+c_losses    = np.load('outputs/c_losses.npy')
+w_distances = np.load('outputs/w_distances.npy')
+epochs      = range(1, len(g_losses) + 1)
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+fig.suptitle('WGAN Training Metrics (All-Plant Dataset)', fontsize=13, fontweight='bold')
+
+for ax, data, color, title, ylabel in zip(
+    axes,
+    [g_losses, c_losses, w_distances],
+    ['#7F77DD', '#D85A30', '#1D9E75'],
+    ['Generator Loss', 'Critic Loss', 'Wasserstein Distance'],
+    ['Loss', 'Loss', 'W-Distance']
+):
+    ax.plot(epochs, data, color=color, linewidth=1.5)
+    ax.set_title(title)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.3)
+
+axes[2].set_title('Wasserstein Distance (should decrease toward 0)')
+plt.tight_layout()
+plt.savefig('outputs/loss_curves.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Cell 6 — Evaluation metrics table
+results = np.load('outputs/evaluation_results.npy', allow_pickle=True).item()
+
+fig, ax = plt.subplots(figsize=(10, 3))
+ax.axis('off')
+
+table_data = [
+    ['FID Score',           f"{results['FID']:.2f}",                                   'Lower is better. <100 acceptable, <50 good'],
+    ['Inception Score',     f"{results['IS_mean']:.2f} ± {results['IS_std']:.2f}",     'Higher is better. Quality + diversity'],
+    ['Wasserstein Distance',f"{results['Wasserstein_distance']:.4f}",                   'Should decrease toward 0 during training'],
+]
+
+table = ax.table(cellText=table_data,
+                 colLabels=['Metric', 'Value', 'Interpretation'],
+                 loc='center', cellLoc='left')
+table.auto_set_font_size(False)
+table.set_fontsize(11)
+table.scale(1.2, 2.2)
+for (row, col), cell in table.get_celld().items():
+    if row == 0:
+        cell.set_facecolor('#7F77DD')
+        cell.set_text_props(color='white', fontweight='bold')
+    elif row % 2 == 0:
+        cell.set_facecolor('#f0f0f8')
+    cell.set_edgecolor('#cccccc')
+
+plt.title('Evaluation Metrics — WGAN on Full PlantVillage Dataset', fontsize=13, fontweight='bold', pad=20)
+plt.savefig('outputs/metrics_table.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Cell 7 — Before vs After accuracy bar chart
+clf = np.load('outputs/classification_results.npy', allow_pickle=True).item()
+acc_before = clf['before']
+acc_after  = clf['after']
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+fig.suptitle('Classifier Performance: Before vs After WGAN Augmentation', fontsize=13, fontweight='bold')
+
+# Overall accuracy
+bars = axes[0].bar(['Without WGAN\nAugmentation', 'With WGAN\nAugmentation'],
+                   [acc_before, acc_after],
+                   color=['#D85A30', '#1D9E75'], width=0.4, edgecolor='white')
+for bar, val in zip(bars, [acc_before, acc_after]):
+    axes[0].text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                 f'{val:.1f}%', ha='center', fontsize=13, fontweight='bold')
+axes[0].set_ylim(0, 100)
+axes[0].set_ylabel('Test Accuracy (%)')
+axes[0].set_title('Overall accuracy (binary: healthy vs diseased)')
+axes[0].grid(axis='y', alpha=0.3)
+improvement = acc_after - acc_before
+axes[0].annotate(f'+{improvement:.1f}% improvement',
+                 xy=(1, acc_after), xytext=(0.5, acc_after + 5),
+                 fontsize=11, color='#1D9E75', fontweight='bold',
+                 arrowprops=dict(arrowstyle='->', color='#1D9E75'))
+
+# Per-class accuracy
+class_names = clf.get('class_names', ['healthy', 'diseased'])
+per_before  = clf.get('per_class_before', {})
+per_after   = clf.get('per_class_after',  {})
+
+x      = np.arange(len(class_names))
+width  = 0.3
+b_vals = [per_before.get(n, 0) for n in class_names]
+a_vals = [per_after.get(n, 0)  for n in class_names]
+
+axes[1].bar(x - width/2, b_vals, width, label='Before', color='#D85A30', alpha=0.85)
+axes[1].bar(x + width/2, a_vals, width, label='After',  color='#1D9E75', alpha=0.85)
+axes[1].set_xticks(x)
+axes[1].set_xticklabels(class_names)
+axes[1].set_ylim(0, 105)
+axes[1].set_ylabel('Accuracy (%)')
+axes[1].set_title('Per-class accuracy')
+axes[1].legend()
+axes[1].grid(axis='y', alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('outputs/accuracy_comparison.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Cell 8 — Dataset balance: before and after augmentation
+with open('data/processed/dataset_info.json') as f:
+    info = json.load(f)
+
+n_healthy  = info['train_healthy']
+n_diseased = info['train_diseased']
+n_generated = max(0, n_healthy - n_diseased)
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+fig.suptitle('Dataset Balance: Before vs After WGAN Augmentation (Full PlantVillage)', fontsize=12, fontweight='bold')
+
+ax1.pie([n_healthy, n_diseased],
+        labels=[f'Healthy\n({n_healthy})', f'Diseased\n({n_diseased})'],
+        colors=['#5DCAA5', '#F0997B'], autopct='%1.0f%%', startangle=90,
+        wedgeprops={'edgecolor': 'white', 'linewidth': 2})
+ax1.set_title(f'Before augmentation\n({len(info["diseased_classes"])} disease types, imbalanced)', fontsize=10)
+
+ax2.pie([n_healthy, n_healthy],
+        labels=[f'Healthy\n({n_healthy})', f'Diseased\n({n_diseased} real\n+ {n_generated} generated)'],
+        colors=['#5DCAA5', '#7F77DD'], autopct='%1.0f%%', startangle=90,
+        wedgeprops={'edgecolor': 'white', 'linewidth': 2})
+ax2.set_title(f'After WGAN augmentation\n(balanced 50:50)', fontsize=10)
+
+plt.tight_layout()
+plt.savefig('outputs/dataset_balance.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Cell 9 — Disease class breakdown: which plant diseases are in the dataset
+with open('data/processed/dataset_info.json') as f:
+    info = json.load(f)
+
+diseased_classes = info['diseased_classes']
+healthy_classes  = info['healthy_classes']
+
+# Count actual images per diseased class from the wgan_train folder
+wgan_dir = 'data/processed/wgan_train/diseased'
+files    = os.listdir(wgan_dir)
+
+class_counts = {}
+for cls in diseased_classes:
+    safe_prefix   = cls.replace(' ', '_').replace('(', '').replace(')', '')
+    class_counts[cls] = sum(1 for f in files if f.startswith(safe_prefix))
+
+# Sort by count
+sorted_classes = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)
+names  = [c[0].replace('___', '\n').replace('_', ' ') for c in sorted_classes]
+counts = [c[1] for c in sorted_classes]
+
+fig, ax = plt.subplots(figsize=(16, 6))
+colors_bar = plt.cm.RdYlGn_r(np.linspace(0.1, 0.9, len(names)))
+bars = ax.barh(names, counts, color=colors_bar, edgecolor='white')
+for bar, count in zip(bars, counts):
+    ax.text(bar.get_width() + 1, bar.get_y() + bar.get_height()/2,
+            str(count), va='center', fontsize=8)
+ax.set_xlabel('Number of training images')
+ax.set_title('Disease Classes in WGAN Training Set (All Plant Types)', fontsize=12, fontweight='bold')
+ax.grid(axis='x', alpha=0.3)
+plt.tight_layout()
+plt.savefig('outputs/disease_class_breakdown.png', dpi=150, bbox_inches='tight')
+plt.show()
+print(f'Total disease classes: {len(diseased_classes)}')
+print(f'Total healthy classes: {len(healthy_classes)}')
+
+# Cell 10 — FINAL SUMMARY FIGURE (use as report cover / presentation title slide)
+fig = plt.figure(figsize=(18, 11))
+fig.suptitle('WGAN-based Synthetic Data Augmentation for Plant Disease Detection\n'
+             '— Full PlantVillage Dataset Results Summary',
+             fontsize=14, fontweight='bold', y=0.98)
+
+gs = gridspec.GridSpec(2, 4, figure=fig, hspace=0.45, wspace=0.35)
+
+# 1. Training progression
+ax1 = fig.add_subplot(gs[0, 0])
+if os.path.exists('outputs/training_progression.png'):
+    ax1.imshow(Image.open('outputs/training_progression.png'))
+ax1.set_title('Training progression', fontsize=10); ax1.axis('off')
+
+# 2. Real vs Generated
+ax2 = fig.add_subplot(gs[0, 1:3])
+if os.path.exists('outputs/real_vs_generated.png'):
+    ax2.imshow(Image.open('outputs/real_vs_generated.png'))
+ax2.set_title('Real vs WGAN-generated (all plant types)', fontsize=10); ax2.axis('off')
+
+# 3. W-distance curve
+ax3 = fig.add_subplot(gs[0, 3])
+ax3.plot(np.load('outputs/w_distances.npy'), color='#1D9E75', linewidth=1.5)
+ax3.set_title('Wasserstein distance', fontsize=10)
+ax3.set_xlabel('Epoch', fontsize=8); ax3.grid(True, alpha=0.3)
+
+# 4. Dataset balance before
+ax4 = fig.add_subplot(gs[1, 0])
+with open('data/processed/dataset_info.json') as f:
+    info = json.load(f)
+ax4.pie([info['train_healthy'], info['train_diseased']],
+        colors=['#5DCAA5', '#F0997B'], autopct='%1.0f%%',
+        wedgeprops={'edgecolor': 'white'})
+ax4.set_title('Before (imbalanced)', fontsize=10)
+
+# 5. Dataset balance after
+ax5 = fig.add_subplot(gs[1, 1])
+ax5.pie([info['train_healthy'], info['train_healthy']],
+        colors=['#5DCAA5', '#7F77DD'], autopct='%1.0f%%',
+        wedgeprops={'edgecolor': 'white'})
+ax5.set_title('After (balanced)', fontsize=10)
+
+# 6. Accuracy comparison
+ax6 = fig.add_subplot(gs[1, 2:])
+if os.path.exists('outputs/classification_results.npy'):
+    clf  = np.load('outputs/classification_results.npy', allow_pickle=True).item()
+    bars = ax6.bar(['Without\nWGAN', 'With\nWGAN'],
+                   [clf['before'], clf['after']],
+                   color=['#D85A30', '#1D9E75'], width=0.4)
+    for bar, val in zip(bars, [clf['before'], clf['after']]):
+        ax6.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                 f'{val:.1f}%', ha='center', fontsize=12, fontweight='bold')
+    ax6.set_ylim(0, 100); ax6.set_ylabel('Accuracy (%)')
+    ax6.set_title('Classification accuracy', fontsize=10)
+    ax6.grid(axis='y', alpha=0.3)
+
+plt.savefig('outputs/FINAL_SUMMARY.png', dpi=180, bbox_inches='tight')
+plt.show()
+print('FINAL_SUMMARY.png saved!')
